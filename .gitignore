@@ -1,0 +1,8 @@
+*.db 
+*.pdf 
+*.txt 
+__pycache__/ 
+*.pyc 
+*.db 
+*.pdf 
+*.txt 
