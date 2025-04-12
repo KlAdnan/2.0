@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Finance Tracker</title>
+    <style>
+        body {
+            background: #111316;
+            color: #E0E0E0;
+            font-family: 'Montserrat', sans-serif;
+            overflow-x: hidden;
+        }
+        nav {
+            position: fixed;
+            width: 100%;
+            background: linear-gradient(to bottom, #111316, #3C2F2F);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+        }
+        nav ul {
+            display: flex;
+            gap: 2rem;
+        }
+        nav ul li a {
+            color: #C6A969;
+            text-decoration: none;
+        }
+        .hero {
+            height: 100vh;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .hero h1 {
+            font-size: 4rem;
+            color: #C6A969;
+            font-family: 'Playfair Display', serif;
+        }
+        .hero .cta {
+            padding: 0.8rem 2rem;
+            background: #C6A969;
+            color: #111316;
+            border-radius: 5px;
+        }
+        .features {
+            padding: 4rem 2rem;
+            overflow-x: scroll;
+            white-space: nowrap;
+        }
+        .feature-scene {
+            display: inline-block;
+            width: 100vw;
+            height: 60vh;
+            background: #006241;
+            margin-right: 2rem;
+            color: #C6A969;
+        }
+        footer {
+            padding: 2rem;
+            text-align: center;
+            background: #3C2F2F;
+            color: #C6A969;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div>AI Finance Tracker</div>
+        <ul>
+            <li><a href="#home">Home</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ul>
+    </nav>
+    <section class="hero" id="home">
+        <h1>Navigate Your Financial Universe with AI</h1>
+        <p>Track, manage, and optimize your finances with artificial intelligence.</p>
+        <a href="#" class="cta">Start Your Journey</a>
+        <canvas id="globe-canvas" style="position: absolute; top: 0; width: 100%; height: 100%; z-index: -1;"></canvas>
+    </section>
+    <section class="features" id="features">
+        <div class="feature-scene">Expense Tracking</div>
+        <div class="feature-scene">Investment Planning</div>
+        <div class="feature-scene">Debt Management</div>
+    </section>
+    <footer id="contact">
+        <p>Developed by Muhammed Adnan | Contact: your-email@example.com</p>
+    </footer>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/particles.js/2.0.0/particles.min.js"></script>
+    <script>
+        // Placeholder for Three.js, GSAP, and Particles.js animations
+    </script>
+</body>
+</html>

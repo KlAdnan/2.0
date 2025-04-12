@@ -641,54 +641,84 @@ def dashboard():
     
     # Market Overview
     st.markdown("### Market Overview")
-    try:
-        # Fetch popular Indian stocks
-        symbols = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'WIPRO.NS']
-        market_data = pd.DataFrame()
-        
-        for symbol in symbols:
+    
+    # Define symbols for Indian and US markets
+    indian_symbols = ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'WIPRO.NS']
+    us_symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
+    
+    # Combine symbols for display
+    all_symbols = indian_symbols + us_symbols
+    market_data = pd.DataFrame()
+    
+    for symbol in all_symbols:
+        try:
             stock = yf.Ticker(symbol)
             hist = stock.history(period='1d')
             if not hist.empty:
                 market_data.loc[symbol, 'Price'] = hist['Close'].iloc[-1]
                 market_data.loc[symbol, 'Change'] = hist['Close'].iloc[-1] - hist['Open'].iloc[-1]
                 market_data.loc[symbol, 'Change %'] = ((hist['Close'].iloc[-1] - hist['Open'].iloc[-1]) / hist['Open'].iloc[-1]) * 100
-        
+                market_data.loc[symbol, 'Market'] = 'Indian' if symbol in indian_symbols else 'US'
+        except Exception as e:
+            st.warning(f"Could not fetch data for {symbol}: {str(e)}")
+            continue
+    
+    if not market_data.empty:
+        st.markdown("#### Real-Time Market Data")
         st.dataframe(market_data.style.format({
-            'Price': '₹{:,.2f}',
-            'Change': '₹{:,.2f}',
+            'Price': '{:,.2f}',
+            'Change': '{:,.2f}',
             'Change %': '{:,.2f}%'
         }))
         
-        # Market Trends Chart
-        st.markdown("### Market Trends (Last Month)")
-        fig = go.Figure()
-        for symbol in symbols:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period='1mo')
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'],
-                                   name=symbol, mode='lines'))
+        # Market Trends Chart for Indian Market
+        st.markdown("#### Indian Market Trends (Last Month)")
+        fig_indian = go.Figure()
+        for symbol in indian_symbols:
+            try:
+                stock = yf.Ticker(symbol)
+                hist = stock.history(period='1mo')
+                if not hist.empty:
+                    fig_indian.add_trace(go.Scatter(x=hist.index, y=hist['Close'],
+                                                    name=symbol, mode='lines'))
+            except Exception as e:
+                st.warning(f"Could not fetch historical data for {symbol}: {str(e)}")
+                continue
         
-        fig.update_layout(
-            title='Stock Performance',
+        fig_indian.update_layout(
+            title='Indian Stock Performance',
             xaxis_title='Date',
             yaxis_title='Price (₹)',
             height=400
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig_indian, use_container_width=True)
         
-    except Exception as e:
-        st.error("Unable to fetch market data. Please check your internet connection.")
+        # Market Trends Chart for US Market
+        st.markdown("#### US Market Trends (Last Month)")
+        fig_us = go.Figure()
+        for symbol in us_symbols:
+            try:
+                stock = yf.Ticker(symbol)
+                hist = stock.history(period='1mo')
+                if not hist.empty:
+                    fig_us.add_trace(go.Scatter(x=hist.index, y=hist['Close'],
+                                                name=symbol, mode='lines'))
+            except Exception as e:
+                st.warning(f"Could not fetch historical data for {symbol}: {str(e)}")
+                continue
+        
+        fig_us.update_layout(
+            title='US Stock Performance',
+            xaxis_title='Date',
+            yaxis_title='Price ($)',
+            height=400
+        )
+        st.plotly_chart(fig_us, use_container_width=True)
+    else:
+        st.error("Unable to fetch market data for any symbols. Please check your internet connection or try again later.")
 
 # ============ EXPENSE TRACKER ============
 def expense_tracker():
-    """
-    This function implements the Smart Expense Tracker functionality.
-    It allows users to:
-        - Add new expenses with date, amount, category, and description.
-        - Visualize expenses with a pie chart and a daily expense trend line chart.
-        - View a summary of total expenses, average daily expense, and the most common expense category.
-    """
     st.markdown("<h1 style='text-align: center;'>Smart Expense Tracker</h1>", unsafe_allow_html=True)
 
     # --- Add New Expense ---
@@ -700,8 +730,7 @@ def expense_tracker():
             expense_amount = st.number_input("Amount (₹)", min_value=0.0, step=100.0)
 
         with col2:
-            default_categories = ["Needs", "Wants", "Investment", "Bills",
-                                  "Entertainment", "Health", "Other"]
+            default_categories = ["Needs", "Wants", "Investments", "Savings", "Entertainment", "Health", "Other"]
             expense_category = st.selectbox("Category", default_categories)
             if expense_category == "Other":
                 expense_category = st.text_input("Specify Category")
@@ -710,8 +739,6 @@ def expense_tracker():
             expense_description = st.text_area("Description", height=100)
 
         if st.button("Add Expense"):
-            # Ensure you have logic to handle st.session_state.user_id
-            # (likely set during user authentication).
             if st.session_state.user_id:
                 conn = sqlite3.connect('finance_tracker.db')
                 c = conn.cursor()
@@ -749,6 +776,82 @@ def expense_tracker():
         conn.close()
 
         if not df_expenses.empty:
+            df_expenses["date"] = pd.to_datetime(df_expenses["date"])
+
+            # --- Day-End Table (Latest Day) ---
+            st.markdown("### Latest Day Expenses")
+            latest_date = df_expenses["date"].max().strftime("%Y-%m-%d")
+            st.markdown(f"**Date: {latest_date}**")
+            
+            latest_day_expenses = df_expenses[df_expenses["date"] == latest_date]
+            
+            day_table = pd.DataFrame(columns=["Category", "Description", "Needs (₹)", "Wants (₹)", "Investments (₹)", "Savings (₹)", "Total (₹)"])
+            for _, row in latest_day_expenses.iterrows():
+                new_row = {
+                    "Category": row["category"],
+                    "Description": row["description"],
+                    "Needs (₹)": row["amount"] if row["category"] == "Needs" else 0,
+                    "Wants (₹)": row["amount"] if row["category"] == "Wants" else 0,
+                    "Investments (₹)": row["amount"] if row["category"] == "Investments" else 0,
+                    "Savings (₹)": row["amount"] if row["category"] == "Savings" else 0,
+                    "Total (₹)": row["amount"]
+                }
+                day_table = pd.concat([day_table, pd.DataFrame([new_row])], ignore_index=True)
+            
+            st.dataframe(day_table.style.format({
+                "Needs (₹)": "{:,.2f}",
+                "Wants (₹)": "{:,.2f}",
+                "Investments (₹)": "{:,.2f}",
+                "Savings (₹)": "{:,.2f}",
+                "Total (₹)": "{:,.2f}"
+            }))
+            
+            # Download button for day-end table
+            csv_day = day_table.to_csv(index=False)
+            st.download_button(
+                label="Download Latest Day Expenses as CSV",
+                data=csv_day,
+                file_name=f"expenses_{latest_date}.csv",
+                mime="text/csv"
+            )
+
+            # --- Month-End Table (Current Month) ---
+            st.markdown("### Current Month Expenses")
+            current_month = datetime.now().strftime("%Y-%m")
+            st.markdown(f"**Month: {current_month}**")
+            
+            df_expenses["month"] = df_expenses["date"].dt.strftime("%Y-%m")
+            current_month_expenses = df_expenses[df_expenses["month"] == current_month]
+            
+            month_table = pd.DataFrame(columns=["Month", "Needs (₹)", "Wants (₹)", "Investments (₹)", "Savings (₹)", "Total (₹)"])
+            if not current_month_expenses.empty:
+                month_row = {
+                    "Month": current_month,
+                    "Needs (₹)": current_month_expenses[current_month_expenses["category"] == "Needs"]["amount"].sum(),
+                    "Wants (₹)": current_month_expenses[current_month_expenses["category"] == "Wants"]["amount"].sum(),
+                    "Investments (₹)": current_month_expenses[current_month_expenses["category"] == "Investments"]["amount"].sum(),
+                    "Savings (₹)": current_month_expenses[current_month_expenses["category"] == "Savings"]["amount"].sum(),
+                    "Total (₹)": current_month_expenses["amount"].sum()
+                }
+                month_table = pd.concat([month_table, pd.DataFrame([month_row])], ignore_index=True)
+            
+            st.dataframe(month_table.style.format({
+                "Needs (₹)": "{:,.2f}",
+                "Wants (₹)": "{:,.2f}",
+                "Investments (₹)": "{:,.2f}",
+                "Savings (₹)": "{:,.2f}",
+                "Total (₹)": "{:,.2f}"
+            }))
+            
+            # Download button for month-end table
+            csv_month = month_table.to_csv(index=False)
+            st.download_button(
+                label="Download Current Month Expenses as CSV",
+                data=csv_month,
+                file_name=f"expenses_{current_month}.csv",
+                mime="text/csv"
+            )
+
             # --- Summary Statistics ---
             st.markdown("### Expense Summary")
             col1, col2, col3 = st.columns(3)
@@ -781,7 +884,6 @@ def expense_tracker():
             st.plotly_chart(fig)
 
             # Daily Expense Trend
-            df_expenses["date"] = pd.to_datetime(df_expenses["date"])
             daily_expenses = (
                 df_expenses.groupby("date")["amount"].sum().reset_index()
             )
@@ -802,8 +904,6 @@ def expense_tracker():
 
 # ============ INVESTMENT PLANNER ============
 def investment_planner():
-    """Calculates and visualizes investment projections."""
-
     st.markdown("<h1 style='text-align: center;'>Investment Planner</h1>", unsafe_allow_html=True)
 
     tab1, tab2, tab3 = st.tabs(["Investment Calculator", "Portfolio Allocation", "Goal Tracker"])
@@ -823,8 +923,7 @@ def investment_planner():
             else:  # Months
                 months = st.number_input("Investment Period (Months)", min_value=1, value=120)
                 years = months / 12  # Calculate years from months
-            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0,
-                                            value=12.0)
+            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0, value=12.0)
         else:  # Lump Sum
             initial_investment = st.number_input("Lump Sum Investment (₹)", min_value=1000, value=50000)
             monthly_investment = 0  # For Lump Sum, no monthly investment
@@ -835,45 +934,47 @@ def investment_planner():
             else:
                 months = st.number_input("Investment Period (Months)", min_value=1, value=120)
                 years = months / 12
-            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0,
-                                            value=12.0)
+            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0, value=12.0)
 
         # --- Common Input Fields ---
         inflation_rate = st.slider("Assumed Inflation Rate (%)", 2.9, 8.9, 4.5)
         holding_period = st.selectbox("Holding Period", ["Less than 12 months", "More than 12 months"])
 
-        # --- Calculations ---
+        # --- Calculations (Matching Groww Calculator Logic) ---
         monthly_rate = expected_return / (12 * 100)
 
         if calc_type == "SIP":
-            # Adjust for Inflation (SIP) - Moved inside the 'if' block
-            real_return = (1 + monthly_rate) / (1 + inflation_rate / 1200) - 1
-            future_value = monthly_investment * ((pow(1 + real_return, months) - 1) / real_return) * (
-                        1 + real_return)
+            # SIP Future Value: FV = P * (((1 + r)^n - 1) / r) * (1 + r)
+            future_value = monthly_investment * (((1 + monthly_rate) ** months - 1) / monthly_rate) * (1 + monthly_rate)
             total_investment = monthly_investment * months
         else:  # Lump Sum
-            # Adjust for Inflation (Lump Sum)
-            real_return = (1 + expected_return / 100) / (1 + inflation_rate / 100) - 1
-            future_value = initial_investment * pow(1 + real_return, years)
+            # Lump Sum Future Value: FV = P * (1 + r)^n
+            future_value = initial_investment * (1 + expected_return / 100) ** years
             total_investment = initial_investment
 
         total_returns = future_value - total_investment
-        inflation_adjusted_value = future_value / pow(1 + inflation_rate / 100, years)
 
-        # Tax Calculation (based on India's 2025 Budget)
+        # --- Inflation Adjustment ---
+        inflation_adjusted_value = future_value / (1 + inflation_rate / 100) ** years
+
+        # --- Tax Calculation ---
         if holding_period == "Less than 12 months":
             tax_rate = 0.20  # STCG - 20%
+            taxable_amount = total_returns
+            tax_amount = taxable_amount * tax_rate
         else:
             tax_rate = 0.125  # LTCG - 12.5%
+            annual_exemption = 125000 * years
+            taxable_amount = max(0, total_returns - annual_exemption)
+            tax_amount = taxable_amount * tax_rate
 
-        tax_amount = total_returns * tax_rate
         after_tax_returns = total_returns - tax_amount
 
         # --- Display Results ---
         st.markdown("### Investment Projections")
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Initial Investment", f"₹{total_investment:,.2f}")
+        col1.metric("Total Investment", f"₹{total_investment:,.2f}")
         col2.metric("Total Returns", f"₹{total_returns:,.2f}", help="Gross return before inflation & taxes")
         col3.metric(
             "Inflation-Adjusted Value",
@@ -887,7 +988,7 @@ def investment_planner():
             f"₹{after_tax_returns:,.2f}",
             delta=f"-₹{tax_amount:,.2f}",
             delta_color="inverse",
-            help=f"Returns after deducting {tax_rate * 100:.2f}% tax"
+            help=f"Returns after deducting {tax_rate * 100:.2f}% tax on taxable gains"
         )
 
         # --- Growth Visualization ---
@@ -899,24 +1000,25 @@ def investment_planner():
             period_range = np.arange(0, months + 1)
             x_axis_label = 'Months'
 
+        growth_values = []
         if calc_type == "SIP":
-            values = [monthly_investment * 12 * (period / 12) for period in
-                      period_range]  # Adjust for years/months
-            monthly_rate = expected_return / (12 * 100)
-            growth_values = [monthly_investment * ((pow(1 + monthly_rate, period) - 1) /
-                                                 monthly_rate) * (1 + monthly_rate)
-                            for period in period_range]
-            # ... (Rest of the growth visualization code)
+            for period in range(int(months) + 1):
+                value = monthly_investment * (((1 + monthly_rate) ** period - 1) / monthly_rate) * (1 + monthly_rate) if period > 0 else 0
+                growth_values.append(value)
+        else:  # Lump Sum
+            for period in period_range:
+                value = initial_investment * (1 + expected_return / 100) ** period
+                growth_values.append(value)
 
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=period_range, y=growth_values, mode='lines', name='Investment Growth'))
-            fig.update_layout(
-                title=f'{calc_type} Investment Growth',
-                xaxis_title=x_axis_label,  # Update x-axis title
-                yaxis_title='Amount (₹)',
-                height=400
-            )
-            st.plotly_chart(fig)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=period_range, y=growth_values, mode='lines', name='Investment Growth'))
+        fig.update_layout(
+            title=f'{calc_type} Investment Growth',
+            xaxis_title=x_axis_label,
+            yaxis_title='Amount (₹)',
+            height=400
+        )
+        st.plotly_chart(fig)
 
     with tab2:
         st.markdown("### Portfolio Allocation")

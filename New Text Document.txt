@@ -682,179 +682,125 @@ def dashboard():
 
 # ============ EXPENSE TRACKER ============
 def expense_tracker():
-    """
-    This function implements the Smart Expense Tracker functionality.
-    It allows users to:
-        - Add new expenses with date, amount, category, and description.
-        - Visualize expenses with a pie chart and a daily expense trend line chart.
-        - View a summary of total expenses, average daily expense, and the most common expense category.
-    """
     st.markdown("<h1 style='text-align: center;'>Smart Expense Tracker</h1>", unsafe_allow_html=True)
-
-    # --- Add New Expense ---
+    
+    # Add New Expense
     with st.expander("Add New Expense", expanded=True):
         col1, col2, col3 = st.columns(3)
-
+        
         with col1:
             expense_date = st.date_input("Date", datetime.now())
             expense_amount = st.number_input("Amount (₹)", min_value=0.0, step=100.0)
-
+        
         with col2:
-            default_categories = ["Needs", "Wants", "Investment", "Bills",
-                                  "Entertainment", "Health", "Other"]
+            default_categories = ["Needs", "Wants", "Investment", "Bills", "Entertainment", "Health", "Other"]
             expense_category = st.selectbox("Category", default_categories)
             if expense_category == "Other":
                 expense_category = st.text_input("Specify Category")
-
+        
         with col3:
             expense_description = st.text_area("Description", height=100)
-
+        
         if st.button("Add Expense"):
-            # Ensure you have logic to handle st.session_state.user_id
-            # (likely set during user authentication).
-            if st.session_state.user_id:
-                conn = sqlite3.connect('finance_tracker.db')
-                c = conn.cursor()
-                c.execute(
-                    """
-                    INSERT INTO expenses (user_id, date, amount, category, description)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        st.session_state.user_id,
-                        expense_date.strftime("%Y-%m-%d"),
-                        expense_amount,
-                        expense_category,
-                        expense_description,
-                    ),
-                )
-                conn.commit()
-                conn.close()
-                st.success("Expense added successfully!")
-            else:
-                st.error("User not authenticated. Please log in.")
+            conn = sqlite3.connect('finance_tracker.db')
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO expenses (user_id, date, amount, category, description)
+                VALUES (?, ?, ?, ?, ?)
+            """, (st.session_state.user_id, expense_date.strftime("%Y-%m-%d"), 
+                  expense_amount, expense_category, expense_description))
+            conn.commit()
+            conn.close()
+            st.success("Expense added successfully!")
+    
+    # Expense Analysis
+conn = sqlite3.connect('finance_tracker.db')
+df_expenses = pd.read_sql_query("""
+    SELECT date, amount, category, description 
+    FROM expenses 
+    WHERE user_id = ?
+""", conn, params=(st.session_state.user_id,))
+conn.close()
 
-    # --- Expense Analysis ---
-    if st.session_state.user_id:
-        conn = sqlite3.connect('finance_tracker.db')
-        df_expenses = pd.read_sql_query(
-            """
-            SELECT date, amount, category, description
-            FROM expenses
-            WHERE user_id = ?
-            """,
-            conn,
-            params=(st.session_state.user_id,),
-        )
-        conn.close()
+if not df_expenses.empty:
+    # Summary Statistics
+    st.markdown("### Expense Summary")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_expenses = df_expenses['amount'].sum()
+        st.metric("Total Expenses", f"{st.session_state.currency} {total_expenses:,.2f}")
+    
+    with col2:
+        avg_daily = df_expenses.groupby('date')['amount'].sum().mean()
+        st.metric("Average Daily Expense", f"{avg_daily:,.2f}")
+    
+    with col3:
+        most_common_category = df_expenses['category'].mode()[0]
+        st.metric("Most Common Category", most_common_category)
 
-        if not df_expenses.empty:
-            # --- Summary Statistics ---
-            st.markdown("### Expense Summary")
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                total_expenses = df_expenses["amount"].sum()
-                st.metric(
-                    "Total Expenses",
-                    f"{st.session_state.currency} {total_expenses:,.2f}"
-                )
-
-            with col2:
-                avg_daily = df_expenses.groupby("date")["amount"].sum().mean()
-                st.metric("Average Daily Expense", f"{avg_daily:,.2f}")
-
-            with col3:
-                most_common_category = df_expenses["category"].mode()[0]
-                st.metric("Most Common Category", most_common_category)
-
-            # --- Visualizations ---
-            st.markdown("### Expense Analysis")
-
-            # Category-wise Pie Chart
-            fig = px.pie(
-                df_expenses,
-                values="amount",
-                names="category",
-                title="Expense Distribution by Category"
-            )
-            st.plotly_chart(fig)
-
-            # Daily Expense Trend
-            df_expenses["date"] = pd.to_datetime(df_expenses["date"])
-            daily_expenses = (
-                df_expenses.groupby("date")["amount"].sum().reset_index()
-            )
-
-            fig = px.line(
-                daily_expenses,
-                x="date",
-                y="amount",
-                title="Daily Expense Trend",
-                labels={"amount": "Amount (₹)", "date": "Date"},
-            )
-            st.plotly_chart(fig)
-        else:
-            st.info("No expenses have been added yet.")
-    else:
-        st.error("User not authenticated. Please log in.")
-
+        
+        # Visualizations
+        st.markdown("### Expense Analysis")
+        
+        # Category-wise Pie Chart
+        fig = px.pie(df_expenses, values='amount', names='category',
+                    title='Expense Distribution by Category')
+        st.plotly_chart(fig)
+        
+        # Daily Expense Trend
+        df_expenses['date'] = pd.to_datetime(df_expenses['date'])
+        daily_expenses = df_expenses.groupby('date')['amount'].sum().reset_index()
+        
+        fig = px.line(daily_expenses, x='date', y='amount',
+                     title='Daily Expense Trend',
+                     labels={'amount': 'Amount (₹)', 'date': 'Date'})
+        st.plotly_chart(fig)
 
 # ============ INVESTMENT PLANNER ============
 def investment_planner():
-    """Calculates and visualizes investment projections."""
-
     st.markdown("<h1 style='text-align: center;'>Investment Planner</h1>", unsafe_allow_html=True)
-
+    
     tab1, tab2, tab3 = st.tabs(["Investment Calculator", "Portfolio Allocation", "Goal Tracker"])
-
+    
     with tab1:
         st.markdown("### Investment Calculator")
         calc_type = st.radio("Select Calculator Type", ["SIP", "Lump Sum"])
 
-        # --- Input Fields ---
+        # Input Fields
         if calc_type == "SIP":
-            initial_investment = 0
-            monthly_investment = st.number_input("Monthly Investment (₹)", min_value=100, value=5000)
-            period_unit = st.selectbox("Investment Period Unit", ["Years", "Months"])
-            if period_unit == "Years":
-                years = st.number_input("Investment Period (Years)", min_value=1, max_value=40, value=10)
-                months = years * 12  # Calculate months from years
-            else:  # Months
-                months = st.number_input("Investment Period (Months)", min_value=1, value=120)
-                years = months / 12  # Calculate years from months
-            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0,
-                                            value=12.0)
+            initial_investment = 0  # For SIP, initial investment is 0
+            monthly_investment = st.number_input("Monthly Investment (₹)", 
+                                               min_value=100, value=5000)
+            years = st.number_input("Investment Period (Years)", 
+                                  min_value=1, max_value=40, value=10)
+            expected_return = st.number_input("Expected Annual Return (%)", 
+                                            min_value=1.0, max_value=30.0, value=12.0)
         else:  # Lump Sum
-            initial_investment = st.number_input("Lump Sum Investment (₹)", min_value=1000, value=50000)
-            monthly_investment = 0  # For Lump Sum, no monthly investment
-            period_unit = st.selectbox("Investment Period Unit", ["Years", "Months"])
-            if period_unit == "Years":
-                years = st.number_input("Investment Period (Years)", min_value=1, max_value=40, value=10)
-                months = years * 12
-            else:
-                months = st.number_input("Investment Period (Months)", min_value=1, value=120)
-                years = months / 12
-            expected_return = st.number_input("Expected Annual Return (%)", min_value=1.0, max_value=30.0,
-                                            value=12.0)
+            initial_investment = st.number_input("Investment Amount (₹)", 
+                                      min_value=1000, value=100000)
+            monthly_investment = 0  # For Lump Sum, monthly investment is 0
+            years = st.number_input("Investment Period (Years)", 
+                                  min_value=1, max_value=40, value=10)
+            expected_return = st.number_input("Expected Annual Return (%)", 
+                                            min_value=1.0, max_value=30.0, value=12.0)
+        
+        # Inflation Adjustment Slider
+        inflation_rate = st.slider("Assumed Inflation Rate (%)", 2.0, 8.0, 4.5)
 
-        # --- Common Input Fields ---
-        inflation_rate = st.slider("Assumed Inflation Rate (%)", 2.9, 8.9, 4.5)
-        holding_period = st.selectbox("Holding Period", ["Less than 12 months", "More than 12 months"])
+        # Holding Period Dropdown
+        holding_period = st.selectbox("Holding Period", 
+                                      ["Less than 12 months", "More than 12 months"])
 
-        # --- Calculations ---
-        monthly_rate = expected_return / (12 * 100)
-
+        # Calculations
         if calc_type == "SIP":
-            # Adjust for Inflation (SIP) - Moved inside the 'if' block
-            real_return = (1 + monthly_rate) / (1 + inflation_rate / 1200) - 1
-            future_value = monthly_investment * ((pow(1 + real_return, months) - 1) / real_return) * (
-                        1 + real_return)
+            monthly_rate = expected_return / (12 * 100)
+            months = years * 12
+            future_value = monthly_investment * ((pow(1 + monthly_rate, months) - 1) / 
+                                               monthly_rate) * (1 + monthly_rate)
             total_investment = monthly_investment * months
         else:  # Lump Sum
-            # Adjust for Inflation (Lump Sum)
-            real_return = (1 + expected_return / 100) / (1 + inflation_rate / 100) - 1
-            future_value = initial_investment * pow(1 + real_return, years)
+            future_value = initial_investment * pow(1 + expected_return/100, years)
             total_investment = initial_investment
 
         total_returns = future_value - total_investment
@@ -864,83 +810,76 @@ def investment_planner():
         if holding_period == "Less than 12 months":
             tax_rate = 0.20  # STCG - 20%
         else:
-            tax_rate = 0.125  # LTCG - 12.5%
-
+            tax_rate = 0.125  # LTCG - 12.5% 
+        
         tax_amount = total_returns * tax_rate
         after_tax_returns = total_returns - tax_amount
 
-        # --- Display Results ---
+        # Display Results
         st.markdown("### Investment Projections")
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Initial Investment", f"₹{total_investment:,.2f}")
-        col2.metric("Total Returns", f"₹{total_returns:,.2f}", help="Gross return before inflation & taxes")
-        col3.metric(
-            "Inflation-Adjusted Value",
-            f"₹{inflation_adjusted_value:,.2f}",
-            delta=f"-₹{(future_value - inflation_adjusted_value):,.2f}",
-            delta_color="inverse",
-            help=f"Future value adjusted for {inflation_rate:.2f}% annual inflation"
-        )
-        col4.metric(
-            "After-Tax Returns",
-            f"₹{after_tax_returns:,.2f}",
-            delta=f"-₹{tax_amount:,.2f}",
-            delta_color="inverse",
-            help=f"Returns after deducting {tax_rate * 100:.2f}% tax"
-        )
+        col2.metric("Total Returns", f"₹{total_returns:,.2f}", help="Gross return before inflation and taxes")
+        col3.metric("Inflation-Adjusted Value", f"₹{inflation_adjusted_value:,.2f}", 
+                    delta=f"-₹{(future_value - inflation_adjusted_value):,.2f}", delta_color="inverse",
+                    help=f"Future value adjusted for {inflation_rate:.2f}% annual inflation")
+        col4.metric("After-Tax Returns", f"₹{after_tax_returns:,.2f}", 
+                    delta=f"-₹{tax_amount:,.2f}", delta_color="inverse",
+                    help=f"Returns after deducting {tax_rate*100:.2f}% tax")
 
-        # --- Growth Visualization ---
+        # Growth Visualization
         st.markdown("### Investment Growth Projection")
-        if period_unit == "Years":
-            period_range = np.arange(0, years + 1)
-            x_axis_label = 'Years'
-        else:  # Months
-            period_range = np.arange(0, months + 1)
-            x_axis_label = 'Months'
-
+        years_range = np.arange(0, years + 1)
+        
         if calc_type == "SIP":
-            values = [monthly_investment * 12 * (period / 12) for period in
-                      period_range]  # Adjust for years/months
+            values = [monthly_investment * 12 * year for year in years_range]
             monthly_rate = expected_return / (12 * 100)
-            growth_values = [monthly_investment * ((pow(1 + monthly_rate, period) - 1) /
-                                                 monthly_rate) * (1 + monthly_rate)
-                            for period in period_range]
-            # ... (Rest of the growth visualization code)
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=period_range, y=growth_values, mode='lines', name='Investment Growth'))
-            fig.update_layout(
-                title=f'{calc_type} Investment Growth',
-                xaxis_title=x_axis_label,  # Update x-axis title
-                yaxis_title='Amount (₹)',
-                height=400
-            )
-            st.plotly_chart(fig)
-
+            growth_values = [monthly_investment * ((pow(1 + monthly_rate, year * 12) - 1) / 
+                                                 monthly_rate) * (1 + monthly_rate) 
+                           for year in years_range]
+        else:
+            values = [principal] * len(years_range)
+            growth_values = [principal * pow(1 + expected_return/100, year) 
+                           for year in years_range]
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=years_range, y=values, 
+                               name='Investment Amount', line=dict(color='blue')))
+        fig.add_trace(go.Scatter(x=years_range, y=growth_values, 
+                               name='Growth', line=dict(color='green')))
+        
+        fig.update_layout(
+            title=f'{calc_type} Investment Growth',
+            xaxis_title='Years',
+            yaxis_title='Amount (₹)',
+            height=400
+        )
+        st.plotly_chart(fig)
+    
     with tab2:
         st.markdown("### Portfolio Allocation")
         age = st.number_input("Your Age", min_value=18, max_value=100, value=30)
-        risk_profile = st.selectbox("Risk Profile",
-                                     ["Conservative", "Moderate", "Aggressive"])
-
+        risk_profile = st.selectbox("Risk Profile", 
+                                  ["Conservative", "Moderate", "Aggressive"])
+        
         # Calculate allocations based on age and risk profile
         equity_percent = max(20, min(80, 100 - age))
-
+        
         if risk_profile == "Conservative":
             equity_percent = max(20, equity_percent - 10)
         elif risk_profile == "Aggressive":
             equity_percent = min(80, equity_percent + 10)
-
+        
         debt_percent = 100 - equity_percent
-
+        
         # Equity breakdown
         large_cap = equity_percent * 0.60
         mid_cap = equity_percent * 0.25
         small_cap = equity_percent * 0.15
-
+        
         col1, col2 = st.columns(2)
-
+        
         with col1:
             # Broad Asset Allocation
             fig = go.Figure(data=[go.Pie(
@@ -950,7 +889,7 @@ def investment_planner():
             )])
             fig.update_layout(title="Broad Asset Allocation")
             st.plotly_chart(fig)
-
+        
         with col2:
             # Equity Breakdown
             fig = go.Figure(data=[go.Pie(
@@ -960,23 +899,23 @@ def investment_planner():
             )])
             fig.update_layout(title="Equity Breakdown")
             st.plotly_chart(fig)
-
+        
         st.markdown(f"""
         ### Recommended Allocation
-
+        
         **Broad Asset Allocation:**
         - Equity: {equity_percent:.1f}%
         - Debt: {debt_percent:.1f}%
-
+        
         **Equity Breakdown:**
         - Large Cap: {large_cap:.1f}%
         - Mid Cap: {mid_cap:.1f}%
         - Small Cap: {small_cap:.1f}%
         """)
-
+    
     with tab3:
         st.markdown("### Goal Tracker")
-
+        
         # Add New Goal
         with st.expander("Add New Goal", expanded=True):
             with st.form("new_goal"):
@@ -985,63 +924,62 @@ def investment_planner():
                 goal_date = st.date_input("Target Date")
                 priority = st.selectbox("Priority", ["High", "Medium", "Low"])
                 current_amount = st.number_input("Current Amount (₹)", min_value=0)
-
+                
                 submitted = st.form_submit_button("Add Goal")
                 if submitted:
                     conn = sqlite3.connect('finance_tracker.db')
                     c = conn.cursor()
                     c.execute("""
-                        INSERT INTO goals (user_id, name, target_amount, current_amount,
-                                           target_date, priority)
+                        INSERT INTO goals (user_id, name, target_amount, current_amount, 
+                                         target_date, priority)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (st.session_state.user_id, goal_name, goal_amount,
+                    """, (st.session_state.user_id, goal_name, goal_amount, 
                           current_amount, goal_date.strftime("%Y-%m-%d"), priority))
                     conn.commit()
                     conn.close()
                     st.success("Goal added successfully!")
-
+        
         # Display Goals
         conn = sqlite3.connect('finance_tracker.db')
         df_goals = pd.read_sql_query("""
-            SELECT name, target_amount, current_amount, target_date, priority
-            FROM goals
+            SELECT name, target_amount, current_amount, target_date, priority 
+            FROM goals 
             WHERE user_id = ?
         """, conn, params=(st.session_state.user_id,))
         conn.close()
-
+        
         if not df_goals.empty:
             st.markdown("### Your Financial Goals")
-
+            
             for _, goal in df_goals.iterrows():
                 progress = (goal['current_amount'] / goal['target_amount']) * 100
-
+                
                 st.markdown(f"""
-                <div style='padding: 1rem; background-color: white; border-radius: 0.5rem;
+                <div style='padding: 1rem; background-color: white; border-radius: 0.5rem; 
                             box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 1rem 0;'>
                     <h4>{goal['name']} ({goal['priority']} Priority)</h4>
                 </div>
                 """, unsafe_allow_html=True)
-
+                
                 col1, col2 = st.columns(2)
-
+                
                 with col1:
-                    st.progress(progress / 100)
+                    st.progress(progress/100)
                     st.markdown(f"Progress: {progress:.1f}%")
-
+                
                 with col2:
                     st.markdown(f"""
-                    Target: ₹{goal['target_amount']:,.2f}
-                    Current: ₹{goal['current_amount']:,.2f}
+                    Target: ₹{goal['target_amount']:,.2f}  
+                    Current: ₹{goal['current_amount']:,.2f}  
                     Target Date: {goal['target_date']}
                     """)
-
+                
                 # Calculate monthly savings needed
                 target_date = datetime.strptime(goal['target_date'], "%Y-%m-%d")
                 months_remaining = (target_date - datetime.now()).days / 30
                 if months_remaining > 0:
                     monthly_needed = (goal['target_amount'] - goal['current_amount']) / months_remaining
                     st.info(f"You need to save ₹{monthly_needed:,.2f} monthly to reach your goal")
-
 
 # ============ ADVANCED ANALYTICS ============
 def advanced_analytics():

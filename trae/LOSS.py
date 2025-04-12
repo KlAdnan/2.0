@@ -1,13 +1,108 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import plotly.graph_objects as go 
 import plotly.express as px
 from datetime import datetime
 import yfinance as yf
 from streamlit_option_menu import option_menu
 import sqlite3
 import hashlib
+import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import io
+import os
+
+
+
+def settings_page():
+    st.markdown("<h1 style='text-align: center;'>Settings</h1>", unsafe_allow_html=True)
+
+    # Profile, Theme, Notifications as before...
+
+    st.markdown("### Data Management")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Export Data as CSV"):
+            conn = sqlite3.connect('finance_tracker.db')
+            df_expenses = pd.read_sql_query("SELECT * FROM expenses WHERE user_id = ?", conn, params=(st.session_state.user_id,))
+            csv = df_expenses.to_csv(index=False)
+            st.download_button("Download CSV", csv, "expenses_data.csv", "text/csv")
+            conn.close()
+
+    with col2:
+        if st.button("Generate Financial Report (PDF)"):
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            # Title
+            elements.append(Paragraph("Personal Financial Report", styles['Title']))
+            elements.append(Spacer(1, 12))
+
+            # User Info
+            conn = sqlite3.connect('finance_tracker.db')
+            c = conn.cursor()
+            c.execute("SELECT username, email FROM users WHERE id = ?", (st.session_state.user_id,))
+            user_info = c.fetchone()
+            elements.append(Paragraph(f"Name: {user_info[0]} | Email: {user_info[1]} | Date: {datetime.now().strftime('%Y-%m-%d')}", styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            # Expenses
+            df_expenses = pd.read_sql_query("SELECT * FROM expenses WHERE user_id = ?", conn, params=(st.session_state.user_id,))
+            total_exp = df_expenses["amount"].sum()
+            elements.append(Paragraph(f"Total Expenses: ₹{total_exp:,.2f}", styles['Heading2']))
+            exp_table = [["Date", "Amount", "Category"]] + df_expenses[["date", "amount", "category"]].values.tolist()[:5]
+            elements.append(Table(exp_table, colWidths=[100, 100, 100]))
+            plt.pie(df_expenses.groupby("category")["amount"].sum(), labels=df_expenses["category"].unique(), autopct='%1.1f%%')
+            plt.savefig("exp_pie.png")
+            elements.append(Image("exp_pie.png", width=200, height=200))
+
+            # Debts
+            loans_df = pd.DataFrame(st.session_state.loans)
+            if not loans_df.empty:
+                total_debt = loans_df["Loan Amount"].sum() - loans_df["Amount Paid"].sum()
+                elements.append(Paragraph(f"Total Debt: ₹{total_debt:,.2f}", styles['Heading2']))
+                debt_table = [["Loan Type", "Amount", "Interest"]] + loans_df[["Loan Type", "Loan Amount", "Interest Rate"]].values.tolist()
+                elements.append(Table(debt_table, colWidths=[100, 100, 100]))
+
+            # Investments (Sample)
+            elements.append(Paragraph("Investment Projections", styles['Heading2']))
+            elements.append(Paragraph("Assuming 5% step-up: ₹X, 10% step-up: ₹Y", styles['Normal']))
+
+            # Debt-Free Timeline
+            if not loans_df.empty:
+                months = 12  # Placeholder calculation
+                elements.append(Paragraph(f"Debt-Free by: {datetime.now() + pd.offsets.MonthEnd(months)}", styles['Normal']))
+
+            # Recommendations
+            elements.append(Paragraph("Recommendations", styles['Heading2']))
+            elements.append(Paragraph("1. Increase savings by 5% monthly\n2. Refinance high-interest loans", styles['Normal']))
+
+            # Checklist
+            elements.append(Paragraph("Action Plan Checklist", styles['Heading2']))
+            checklist = Table([["Task", "Done"], ["Review Budget", "☐"], ["Increase Investments", "☐"]], colWidths=[200, 50])
+            elements.append(checklist)
+
+            doc.build(elements)
+            buffer.seek(0)
+            st.download_button("Download PDF Report", buffer, "financial_report.pdf", "application/pdf")
+
+            conn.close()
+
+
+# Check if streamlit_option_menu is installed
+try:
+    from streamlit_option_menu import option_menu
+except ImportError:
+    st.error("Please install streamlit-option-menu via `pip install streamlit-option-menu`")
+    st.stop()
 
 # ============ PAGE CONFIG ============
 st.set_page_config(
@@ -26,6 +121,8 @@ if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'theme' not in st.session_state:     # Initialize 'theme' in session state
     st.session_state.theme = "light"     # Default to "light" theme
+if 'loans' not in st.session_state:
+    st.session_state.loans = []
 
 # ============ THEME IMPLEMENTATION ============
 def load_css():
@@ -489,6 +586,21 @@ def init_db():
                   category TEXT,
                   description TEXT)''')
     
+    # Loans table
+    c.execute('''CREATE TABLE IF NOT EXISTS loans 
+            (id INTEGER PRIMARY KEY, 
+            user_id INTEGER, 
+            loan_type TEXT, 
+            principal REAL, 
+            interest_rate REAL, 
+            tenure_months INTEGER, 
+            start_date TEXT, 
+            outstanding_balance REAL,
+            monthly_payment REAL, 
+            description TEXT,
+            amount_paid REAL DEFAULT 0.0,
+            emi_amount REAL)''')
+
     # Investment goals table
     c.execute('''CREATE TABLE IF NOT EXISTS goals
                  (id INTEGER PRIMARY KEY,
@@ -501,9 +613,6 @@ def init_db():
     
     conn.commit()
     conn.close()
-
-# Initialize database
-init_db()
 
 # ============ AUTHENTICATION ============
 def hash_password(password):
@@ -583,26 +692,26 @@ def auth_page():
 def create_navigation():
     return option_menu(
         menu_title=None,
-        options=["Dashboard", "Expenses", "Investments", "Analysis", "Settings"],
-        icons=["house", "wallet", "graph-up", "clipboard-data", "gear"],
+        options=["Dashboard", "Expenses", "Investments", "Analysis", "Debt Management", "Settings"],
+        icons=["house", "wallet", "graph-up", "clipboard-data", "credit-card", "calculator", "gear"],
         menu_icon="cast",
         default_index=0,
         orientation="horizontal",
         styles={
-    "container": {"padding": "10px!important", "background-color": COLORS['primary']},
-    "icon": {"color": COLORS['text_light'], "font-size": "20px"},
-    "nav-link": {
-        "font-size": "16px",
-        "text-align": "center",
-        "margin": "5px",
-        "padding": "10px 20px",
-        "--hover-color": COLORS['accent'],
-        "color": COLORS['text_light']
-    },
-    "nav-link-selected": {"background-color": COLORS['accent']},
-}
+            "container": {"padding": "10px!important", "background-color": COLORS['primary']},
+            "icon": {"color": COLORS['text_light'], "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px",
+                "text-align": "left",
+                "margin": "0px",
+                "padding": "10px 20px",
+                "--hover-color": COLORS['accent'],
+                "color": COLORS['text_light']
+            },
+            "nav-link-selected": {"background-color": COLORS['accent']},
+        }
+    ) 
 
-    )
 
 # ============ DASHBOARD ============
 def dashboard():
@@ -1272,7 +1381,210 @@ def advanced_analytics():
         
         for rec in recommendations:
             st.markdown(rec)
+            st.info("No loans added yet.")
+        else:
+            st.error("User not authenticated. Please log in.")
+# ============ DEBT MANAGEMENT ============ 
+def debt_management():
+    st.markdown("<h1 style='text-align: center;'>Debt Management</h1>", unsafe_allow_html=True)
 
+    # Load Bootstrap Icons CDN
+    st.markdown("""
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+    """, unsafe_allow_html=True)
+
+    # Loan Types with Default Rates and Icons
+    loan_types = {
+        "Personal Loan": {"icon": "cash", "interest_rate": 15.0},
+        "Credit Card Loan": {"icon": "credit-card", "interest_rate": 45.0},
+        "Education Loan": {"icon": "book", "interest_rate": 10.0},
+        "Home Loan": {"icon": "house", "interest_rate": 8.0},
+        "Car Loan": {"icon": "car-front", "interest_rate": 9.0},
+        "Business Loan": {"icon": "briefcase", "interest_rate": 12.0},
+        "Gold Loan": {"icon": "gem", "interest_rate": 10.0},
+        "Agricultural Loan": {"icon": "flower1", "interest_rate": 7.0},
+        "Consumer Durable Loan": {"icon": "cart-fill", "interest_rate": 18.0},
+        "Loan Against Property": {"icon": "building", "interest_rate": 11.0},
+        "Loans Against Securities": {"icon": "shield-lock", "interest_rate": 9.0},
+        "Payday Loan": {"icon": "calendar", "interest_rate": 50.0},
+        "Two-Wheeler Loan": {"icon": "bicycle", "interest_rate": 12.0},
+        "Government-Backed Loan": {"icon": "bank", "interest_rate": 6.0}
+    }
+
+    # Tabs
+    tab1, tab2 = st.tabs(["Loan Entry & Editing", "Debt Strategy"])
+
+    ### SECTION 1: LOAN ENTRY & EDITING ###
+    with tab1:
+        st.markdown("### Add New Loan")
+        loan_type = option_menu(
+            menu_title="Select Loan Type:",
+            options=list(loan_types.keys()),
+            icons=[loan_types[lt]["icon"] for lt in loan_types],
+            menu_icon="list",
+            default_index=0,
+            key="loan_type_menu",
+            styles={"nav-link-selected": {"background-color": COLORS['primary']}}
+        )
+        default_interest = loan_types[loan_type]["interest_rate"]
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            loan_amount = st.number_input("Loan Amount (₹)", min_value=0.0, step=1000.0)
+        with col2:
+            emi_amount = st.number_input("EMI Amount (₹)", min_value=0.0, step=100.0)
+        with col3:
+            amount_paid = st.number_input("Amount Paid (₹)", min_value=0.0, step=1000.0)
+
+        col4, col5 = st.columns(2)
+        with col4:
+            tenure_years = st.number_input("Tenure Years", min_value=0, step=1)
+        with col5:
+            tenure_months = st.number_input("Tenure Months", min_value=0, max_value=11, step=1)
+
+        interest_rate = st.slider("Interest Rate (%)", 1.0, 100.0, float(default_interest), step=0.1)
+
+        if st.button("Submit", key="add_loan"):
+            if not st.session_state.user_id:
+                st.error("Please log in to add a loan.")
+            else:
+                tenure = (tenure_years * 12) + tenure_months
+                conn = sqlite3.connect('finance_tracker.db')
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO loans (user_id, loan_type, principal, emi_amount, amount_paid, interest_rate, tenure_months)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (st.session_state.user_id, loan_type, loan_amount, emi_amount, amount_paid, interest_rate, tenure))
+                conn.commit()
+                conn.close()
+                sync_loans_with_db()
+                st.success("Loan added successfully!")
+
+        # Loan Overview and Editing
+        if st.session_state.loans:
+            st.markdown("### Loan Overview")
+            df = pd.DataFrame(st.session_state.loans)
+            df["Outstanding Balance"] = df["Loan Amount"] - df["Amount Paid"]
+
+            for i, loan in df.iterrows():
+                col1, col2, col3 = st.columns([3, 1, 1])
+                with col1:
+                    st.write(f"{loan['Loan Type']} - ₹{loan['Outstanding Balance']:,.2f} @ {loan['Interest Rate']}%")
+                with col2:
+                    if st.button("Edit", key=f"edit_{i}"):
+                        st.session_state.edit_loan_idx = i
+                with col3:
+                    if st.button("Delete", key=f"delete_{i}"):
+                        conn = sqlite3.connect('finance_tracker.db')
+                        c = conn.cursor()
+                        c.execute("DELETE FROM loans WHERE id = ?", (loan['id'],))
+                        conn.commit()
+                        conn.close()
+                        st.session_state.loans.pop(i)
+                        sync_loans_with_db()
+                        st.rerun()
+
+            # Edit Loan Form
+            if "edit_loan_idx" in st.session_state:
+                idx = st.session_state.edit_loan_idx
+                loan = st.session_state.loans[idx]
+                with st.form(f"edit_form_{idx}"):
+                    new_amount = st.number_input("Loan Amount", value=float(loan["Loan Amount"]))
+                    new_emi = st.number_input("EMI Amount", value=float(loan["EMI Amount"]))
+                    new_paid = st.number_input("Amount Paid", value=float(loan["Amount Paid"]))
+                    new_rate = st.slider("Interest Rate (%)", 1.0, 100.0, float(loan["Interest Rate"]))
+                    new_tenure = st.number_input("Tenure (Months)", value=int(loan["Tenure (Months)"]))
+                    if st.form_submit_button("Update"):
+                        conn = sqlite3.connect('finance_tracker.db')
+                        c = conn.cursor()
+                        c.execute("""
+                            UPDATE loans SET principal = ?, emi_amount = ?, amount_paid = ?, interest_rate = ?, tenure_months = ?
+                            WHERE id = ?
+                        """, (new_amount, new_emi, new_paid, new_rate, new_tenure, loan['id']))
+                        conn.commit()
+                        conn.close()
+                        st.session_state.loans[idx].update({
+                            "Loan Amount": new_amount, "EMI Amount": new_emi, "Amount Paid": new_paid,
+                            "Interest Rate": new_rate, "Tenure (Months)": new_tenure
+                        })
+                        del st.session_state.edit_loan_idx
+                        st.rerun()
+
+            # CSV Export
+            if st.session_state.loans:
+                csv = df.to_csv(index=False)
+                st.download_button("Export Loans as CSV", csv, "loans_data.csv", "text/csv")
+
+            # Interest Rate Distribution
+            fig = px.pie(df, values="Interest Rate", names="Loan Type", title="Interest Rate Distribution")
+            st.plotly_chart(fig)
+
+    ### SECTION 2: DEBT STRATEGY ###
+    with tab2:
+        st.markdown("### Debt Strategy")
+        if not st.session_state.loans:
+            st.info("No loans added yet.")
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                monthly_budget = st.number_input("Monthly Budget (₹)", min_value=0.0, value=10000.0)
+            with col2:
+                extra_payment = st.number_input("Extra Payment (₹)", min_value=0.0, value=0.0)
+
+            strategy = st.selectbox("Strategy", ["Debt Avalanche", "Debt Snowball"])
+
+            loans_df = pd.DataFrame(st.session_state.loans)
+            loans_df["Outstanding Balance"] = loans_df["Loan Amount"] - loans_df["Amount Paid"]
+            loans_df["Monthly Interest"] = (loans_df["Outstanding Balance"] * (loans_df["Interest Rate"] / 100)) / 12
+            loans_df["Minimum Payment"] = loans_df["EMI Amount"]
+
+            if "Avalanche" in strategy:
+                loans_df = loans_df.sort_values("Interest Rate", ascending=False)
+            else:
+                loans_df = loans_df.sort_values("Outstanding Balance", ascending=True)
+
+            total_budget = monthly_budget + extra_payment
+            repayment_plan = []
+            remaining_balance = loans_df["Outstanding Balance"].sum()
+            months = 0
+            interest_paid = 0
+            temp_loans = loans_df.copy()
+
+            while remaining_balance > 0 and months < 1200:
+                month_budget = total_budget
+                month_interest = temp_loans["Monthly Interest"].sum()
+                interest_paid += month_interest
+                for idx, loan in temp_loans.iterrows():
+                    if month_budget >= loan["Minimum Payment"] and loan["Outstanding Balance"] > 0:
+                        payment = min(loan["Minimum Payment"], loan["Outstanding Balance"] + loan["Monthly Interest"])
+                        temp_loans.at[idx, "Outstanding Balance"] = max(0, loan["Outstanding Balance"] + loan["Monthly Interest"] - payment)
+                        month_budget -= payment
+                if month_budget > 0:
+                    for idx, loan in temp_loans.iterrows():
+                        if loan["Outstanding Balance"] > 0:
+                            extra = min(month_budget, loan["Outstanding Balance"])
+                            temp_loans.at[idx, "Outstanding Balance"] = max(0, loan["Outstanding Balance"] - extra)
+                            month_budget -= extra
+                            break
+                temp_loans["Monthly Interest"] = (temp_loans["Outstanding Balance"] * (temp_loans["Interest Rate"] / 100)) / 12
+                remaining_balance = temp_loans["Outstanding Balance"].sum()
+                repayment_plan.append({"Month": months, "Remaining Balance": remaining_balance})
+                months += 1
+                if month_budget > 0 and remaining_balance <= 0:
+                    break
+
+            repayment_df = pd.DataFrame(repayment_plan)
+            if months >= 1200:
+                st.error("Debt cannot be cleared with current budget.")
+            else:
+                debt_free_date = datetime.now() + pd.offsets.MonthEnd(months)
+                st.success(f"Debt-free by {debt_free_date.strftime('%B %Y')} ({months} months)")
+                st.metric("Total Interest Paid", f"₹{interest_paid:,.2f}")
+
+            fig = go.Figure(go.Scatter(x=repayment_df["Month"], y=repayment_df["Remaining Balance"],
+                                     mode="lines", name="Balance", line=dict(color=COLORS['primary'])))
+            fig.update_layout(title="Debt Repayment Progress", xaxis_title="Months", yaxis_title="Balance (₹)")
+            st.plotly_chart(fig)
 # ============ SETTINGS PAGE ============
 def settings_page():
     st.markdown("<h1 style='text-align: center;'>Settings</h1>", unsafe_allow_html=True)
@@ -1310,49 +1622,193 @@ def settings_page():
     st.checkbox("Monthly Report", value=True)
     st.checkbox("Investment Alerts", value=True)
     
+    def settings_page():
+        st.markdown("<h1 style='text-align: center;'>Settings</h1>", unsafe_allow_html=True)
+
+    # Profile Settings
+    st.markdown("### Profile Settings")
+    col1, col2 = st.columns(2)
+    with col1:
+        conn = sqlite3.connect('finance_tracker.db')
+        c = conn.cursor()
+        c.execute("SELECT username, email FROM users WHERE id = ?", (st.session_state.user_id,))
+        user_info = c.fetchone()
+        conn.close()
+        if user_info:
+            username, email = user_info
+            st.text_input("Username", value=username, disabled=True)
+            st.text_input("Email", value=email, disabled=True)
+    
+    with col2:
+        st.markdown("### Theme Settings")
+        dark_mode = st.toggle("Dark Mode", value=st.session_state.dark_mode)
+        if dark_mode != st.session_state.dark_mode:
+            st.session_state.dark_mode = dark_mode
+            st.rerun()
+
+    # Notification Settings
+    st.markdown("### Notification Settings")
+    st.checkbox("Email Alerts for Unusual Expenses", value=True)
+    st.checkbox("Monthly Report", value=True)
+    st.checkbox("Investment Alerts", value=True)
+
     # Data Management
     st.markdown("### Data Management")
-    
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        if st.button("Export Data"):
-            # Get user's data
+        if st.button("Export Data as CSV"):
             conn = sqlite3.connect('finance_tracker.db')
             df_expenses = pd.read_sql_query("""
                 SELECT date, amount, category, description 
                 FROM expenses 
                 WHERE user_id = ?
             """, conn, params=(st.session_state.user_id,))
-            
-            # Convert to CSV
-            csv = df_expenses.to_csv(index=False)
-            
-            # Create download button
+            conn.close()
+            if not df_expenses.empty:
+                csv = df_expenses.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name="my_financial_data.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No expense data available to export.")
+
+    with col2:
+        if st.button("Generate Financial Report (PDF)"):
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            styles = getSampleStyleSheet()
+            elements = []
+
+            # Title
+            elements.append(Paragraph("Personal Financial Report", styles['Title']))
+            elements.append(Spacer(1, 12))
+
+            # User Info
+            conn = sqlite3.connect('finance_tracker.db')
+            c = conn.cursor()
+            c.execute("SELECT username, email FROM users WHERE id = ?", (st.session_state.user_id,))
+            user_info = c.fetchone()
+            elements.append(Paragraph(
+                f"Name: {user_info[0]} | Email: {user_info[1]} | Date: {datetime.now().strftime('%Y-%m-%d')}",
+                styles['Normal']
+            ))
+            elements.append(Spacer(1, 12))
+
+            # Expenses Section
+            df_expenses = pd.read_sql_query("SELECT * FROM expenses WHERE user_id = ?", conn, params=(st.session_state.user_id,))
+            if not df_expenses.empty:
+                total_exp = df_expenses["amount"].sum()
+                elements.append(Paragraph(f"Total Expenses: ₹{total_exp:,.2f}", styles['Heading2']))
+                exp_table_data = [["Date", "Amount", "Category"]] + df_expenses[["date", "amount", "category"]].values.tolist()[:5]
+                elements.append(Table(exp_table_data, colWidths=[100, 100, 100]))
+                
+                # Pie Chart
+                plt.figure(figsize=(6, 4))
+                plt.pie(df_expenses.groupby("category")["amount"].sum(), labels=df_expenses["category"].unique(), autopct='%1.1f%%')
+                plt.title("Expense Distribution")
+                plt.savefig("exp_pie.png")
+                plt.close()
+                elements.append(Image("exp_pie.png", width=200, height=200))
+                elements.append(Spacer(1, 12))
+            else:
+                elements.append(Paragraph("No expenses recorded.", styles['Normal']))
+
+            # Debts Section
+            loans_df = pd.DataFrame(st.session_state.loans)
+            if not loans_df.empty:
+                total_debt = loans_df["Loan Amount"].sum() - loans_df["Amount Paid"].sum()
+                elements.append(Paragraph(f"Total Outstanding Debt: ₹{total_debt:,.2f}", styles['Heading2']))
+                debt_table_data = [["Loan Type", "Amount", "Interest Rate"]] + loans_df[["Loan Type", "Loan Amount", "Interest Rate"]].values.tolist()
+                elements.append(Table(debt_table_data, colWidths=[100, 100, 100]))
+                
+                # Debt-Free Timeline (Simple calculation based on EMI)
+                total_emi = loans_df["EMI Amount"].sum()
+                if total_emi > 0:
+                    months_to_debt_free = total_debt / total_emi
+                    debt_free_date = datetime.now() + pd.offsets.MonthEnd(int(months_to_debt_free))
+                    elements.append(Paragraph(f"Estimated Debt-Free Date: {debt_free_date.strftime('%B %Y')} ({int(months_to_debt_free)} months)", styles['Normal']))
+                elements.append(Spacer(1, 12))
+            else:
+                elements.append(Paragraph("No debts recorded.", styles['Normal']))
+
+            # Investments Section (Sample with Projections)
+            elements.append(Paragraph("Investment Projections", styles['Heading2']))
+            # Placeholder: Assuming some investment data from goals or manual input
+            conn.execute("SELECT * FROM goals WHERE user_id = ?", (st.session_state.user_id,))
+            goals = conn.fetchall()
+            if goals:
+                total_current = sum(goal[4] for goal in goals)  # current_amount
+                total_target = sum(goal[3] for goal in goals)  # target_amount
+                assumed_rate = 0.12  # 12% annual return
+                years = 5  # 5-year projection
+                step_up_5 = total_current * (1 + assumed_rate * 1.05) ** years
+                step_up_10 = total_current * (1 + assumed_rate * 1.10) ** years
+                elements.append(Paragraph(
+                    f"Current Investment: ₹{total_current:,.2f}\n"
+                    f"Target: ₹{total_target:,.2f}\n"
+                    f"5% Annual Step-Up: ₹{step_up_5:,.2f}\n"
+                    f"10% Annual Step-Up: ₹{step_up_10:,.2f}",
+                    styles['Normal']
+                ))
+            else:
+                elements.append(Paragraph("No investment goals recorded.", styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            # Recommendations
+            elements.append(Paragraph("Recommendations", styles['Heading2']))
+            recommendations = []
+            if total_exp > 0 and total_debt > 0:
+                recommendations.append("1. Reduce discretionary spending by 5% to accelerate debt repayment.")
+            if loans_df["Interest Rate"].max() > 15 if not loans_df.empty else False:
+                recommendations.append("2. Refinance high-interest loans (>15%) to lower rates.")
+            if not goals:
+                recommendations.append("3. Set up investment goals to build wealth.")
+            for rec in recommendations:
+                elements.append(Paragraph(rec, styles['Normal']))
+            elements.append(Spacer(1, 12))
+
+            # Checklist
+            elements.append(Paragraph("Action Plan Checklist", styles['Heading2']))
+            checklist_data = [
+                ["Task", "Done"],
+                ["Review Monthly Budget", "☐"],
+                ["Increase Investments by 5%", "☐"],
+                ["Negotiate Loan Rates", "☐"]
+            ]
+            elements.append(Table(checklist_data, colWidths=[200, 50]))
+
+            # Build and Download PDF
+            doc.build(elements)
+            buffer.seek(0)
             st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name="my_financial_data.csv",
-                mime="text/csv"
+                "Download PDF Report",
+                buffer,
+                "financial_report.pdf",
+                "application/pdf"
             )
-    
+            
+            # Cleanup temporary file
+            if os.path.exists("exp_pie.png"):
+                os.remove("exp_pie.png")
+            
+            conn.close()
+
+    # Delete Account
     with col2:
         if st.button("Delete Account"):
             st.warning("⚠️ This will permanently delete your account and all associated data!")
             if st.button("Confirm Delete"):
                 conn = sqlite3.connect('finance_tracker.db')
                 c = conn.cursor()
-                # Delete user's data
-                c.execute("DELETE FROM expenses WHERE user_id = ?", 
-                         (st.session_state.user_id,))
-                c.execute("DELETE FROM goals WHERE user_id = ?", 
-                         (st.session_state.user_id,))
-                c.execute("DELETE FROM users WHERE id = ?", 
-                         (st.session_state.user_id,))
+                c.execute("DELETE FROM expenses WHERE user_id = ?", (st.session_state.user_id,))
+                c.execute("DELETE FROM goals WHERE user_id = ?", (st.session_state.user_id,))
+                c.execute("DELETE FROM users WHERE id = ?", (st.session_state.user_id,))
                 conn.commit()
                 conn.close()
-                
-                # Clear session state
                 st.session_state.clear()
                 st.success("Account deleted successfully!")
                 st.rerun()
@@ -1374,7 +1830,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    
     if not st.session_state.authenticated:
         auth_page()
     else:
@@ -1388,15 +1843,16 @@ def main():
             investment_planner()
         elif selected == "Analysis":
             advanced_analytics()
+        elif selected == "Debt Management":
+            debt_management()
         elif selected == "Settings":
             settings_page()
-            
-        # Add footer here
-        st.markdown("""
-            <div class='footer'>
-                Developed by Muhammed Adnan | Contact: kladnan321@gmail.com
-            </div>
-        """, unsafe_allow_html=True)
+            # Add footer here
+            st.markdown("""
+                <div class='footer'>
+                    Developed by Muhammed Adnan | Contact: kladnan321@gmail.com
+                </div>
+            """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()

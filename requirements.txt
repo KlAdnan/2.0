@@ -1,0 +1,10 @@
+streamlit
+pandas
+numpy
+plotly
+yfinance
+streamlit-option-menu
+scikit-learn
+python-dotenv
+sqlite3
+hashlib
